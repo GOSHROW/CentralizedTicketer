@@ -9,6 +9,7 @@ import re
 from flask import Flask, render_template, request, flash, redirect, url_for, session, render_template_string
 import markdown.extensions.fenced_code
 from passlib.hash import sha256_crypt
+from flask_api import status
 import src.LoginRegister as LR
 from src.Auth import Auth
 
@@ -17,10 +18,14 @@ secret = secrets.token_urlsafe(32)
 app.secret_key = secret
 emailRegex = r"^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$"
 
+# Please change these details to your personal MongoDB client
+# Within my Cluster on atlas, I have created a DB: "TicketedIssues"
+# This encloses the collections: Users and Issues
 with open('./secret.json') as f:
     data = json.load(f)
 mongoPassword = data["MONGO Pass"]
-dbURL = "mongodb+srv://admin:" + mongoPassword + "@cluster0.8x8cd.gcp.mongodb.net/TicketedIssues?retryWrites=true&w=majority"
+mongoEndpoint = "@cluster0.8x8cd.gcp.mongodb.net/TicketedIssues?retryWrites=true&w=majority"
+dbURL = "mongodb+srv://admin:" + mongoPassword + mongoEndpoint
 client = pymongo.MongoClient(dbURL)
 
 @app.route('/')
@@ -43,7 +48,6 @@ def register_page():
             username  = form.username.data
             email = form.email.data
             password = sha256_crypt.encrypt(str(form.password.data))
-            print(str(form.password.data))
             userCollection = client["TicketedIssues"]["Users"]
             if not re.match(emailRegex, email):
                 flash("Email Invalid")
@@ -76,7 +80,7 @@ def register_page():
 @app.route('/login/', methods=["GET", "POST"])
 def login():
     try:
-        print("A")
+        # print("A")
         form = LR.LoginForm(request.form)
         if request.method == "POST":
             if form.validate():
@@ -85,19 +89,19 @@ def login():
                 userCollection = client["TicketedIssues"]["Users"]
                 for users in userCollection.find():
                     if users["username"].casefold() == username.casefold():
-                        print("E")
+                        # print("E")
                         isUser = sha256_crypt.verify(password, users["passHash"])
                         print(isUser)
                         if isUser:
-                            print("F")
+                            # print("F")
                             session['logged_in'] = True
                             session['username'] = username
                             return redirect(url_for("auth"))
                         else:
-                            print("G")
+                            # print("G")
                             flash("Error in login.")
                             break
-        print("C")
+        # print("C")
         return render_template("login.html", form=form)
     except Exception as e:
         return(str(e))
@@ -107,7 +111,7 @@ def getAuth():
     if 'username' in session:
         user = session["username"]
         userCollection = client["TicketedIssues"]["Users"]
-        for users in userCollection:
+        for users in userCollection.find():
             if users["username"] == user:
                 return render_template(users["auth"])
         return redirect(url_for("register"))
@@ -117,6 +121,23 @@ def getAuth():
             time.sleep(5)
             return redirect(url_for("login"))
         return render_template_string("Error in getting Auth Key, check Session.")
+
+
+
+@app.route('/api/client/', methods=["GET", "PUT", "POST", "DELETE"])
+def clientMethods():
+    if request.method == "GET":
+        username = request.args.get('user', '')
+        key = request.args.get('key', '')
+        users = client["TicketedIssues"]["Users"]
+        print([x for x in users.find()])
+        for user in users.find():
+            if user["username"] == username and user["auth"] == key:
+                print("yolanda")
+        else:
+            return "stuff"
+        return {}, status.HTTP_401_UNAUTHORIZED
+    return ''
 
 if (__name__ == '__main__'):
     app.run(debug=True)    

@@ -6,12 +6,13 @@ import json
 import time
 import re
 
-from flask import Flask, render_template, request, flash, redirect, url_for, session, render_template_string
+from flask import Flask, render_template, request, flash, redirect, url_for, session, render_template_string, abort, jsonify
 import markdown.extensions.fenced_code
 from passlib.hash import sha256_crypt
 from flask_api import status
 import src.LoginRegister as LR
 from src.Auth import Auth
+from src import Client, Partner
 
 app = Flask(__name__)
 secret = secrets.token_urlsafe(32)
@@ -26,7 +27,7 @@ with open('./secret.json') as f:
 mongoPassword = data["MONGO Pass"]
 mongoEndpoint = "@cluster0.8x8cd.gcp.mongodb.net/TicketedIssues?retryWrites=true&w=majority"
 dbURL = "mongodb+srv://admin:" + mongoPassword + mongoEndpoint
-client = pymongo.MongoClient(dbURL)
+dbclient = pymongo.MongoClient(dbURL)
 
 @app.route('/')
 def hello():
@@ -48,7 +49,7 @@ def register_page():
             username  = form.username.data
             email = form.email.data
             password = sha256_crypt.encrypt(str(form.password.data))
-            userCollection = client["TicketedIssues"]["Users"]
+            userCollection = dbclient["TicketedIssues"]["Users"]
             if not re.match(emailRegex, email):
                 flash("Email Invalid")
                 time.sleep(5)
@@ -86,7 +87,7 @@ def login():
             if form.validate():
                 username  = form.username.data
                 password = str(form.password.data)
-                userCollection = client["TicketedIssues"]["Users"]
+                userCollection = dbclient["TicketedIssues"]["Users"]
                 for users in userCollection.find():
                     if users["username"].casefold() == username.casefold():
                         # print("E")
@@ -110,7 +111,7 @@ def login():
 def getAuth():
     if 'username' in session:
         user = session["username"]
-        userCollection = client["TicketedIssues"]["Users"]
+        userCollection = dbclient["TicketedIssues"]["Users"]
         for users in userCollection.find():
             if users["username"] == user:
                 return render_template(users["auth"])
@@ -123,21 +124,48 @@ def getAuth():
         return render_template_string("Error in getting Auth Key, check Session.")
 
 
-
 @app.route('/api/client/', methods=["GET", "PUT", "POST", "DELETE"])
 def clientMethods():
     if request.method == "GET":
         username = request.args.get('user', '')
-        key = request.args.get('key', '')
-        users = client["TicketedIssues"]["Users"]
-        print([x for x in users.find()])
-        for user in users.find():
-            if user["username"] == username and user["auth"] == key:
-                print("yolanda")
-        else:
-            return "stuff"
-        return {}, status.HTTP_401_UNAUTHORIZED
-    return ''
+        if Client.verify(dbclient, request):
+            return Client.getStatus(dbclient, username)
+        abort(401)
+    if request.method == "PUT":
+        if Client.verify(dbclient, request):
+            Client.putRequest(dbclient, request)
+            return jsonify("SUCCESS"), 200
+        abort(401)
+    if request.method == "POST":
+        if Client.verify(dbclient, request):
+            Client.addIssue(dbclient, request)
+            return jsonify("SUCCESS"), 200
+        abort(401)
+    if request.method == "DELETE":
+        if Client.verify(dbclient, request):
+            Client.delIssue(dbclient, request)
+            return jsonify("SUCCESS"), 200
+        abort(401)
+    abort(400)
+
+
+@app.route('/api/partner/', methods=["GET", "POST"])
+def partnerMethods():  
+    if request.method == "GET":
+        if Partner.verify(dbclient, request):
+            return jsonify(dbclient["TicketedIssues"]["Issues"].find())
+        abort(401)
+    if request.method == "POST":
+        agentname = request.args.get('agent', '')
+        key = request.args.get('key', '') 
+        issueno =  request.args.get('issueno', '') 
+        user = request.args.get('user', '')
+        if Partner.verify(dbclient, request):
+            dbclient["TicketedIssues"]["Issues"].update({"issueno": issueno, "user": user, "allotted": "None"}, {"allotted": agentname})
+            return jsonify("Allotted Success"), 200
+        abort(401)
+    abort(400)
+
 
 if (__name__ == '__main__'):
     app.run(debug=True)    
